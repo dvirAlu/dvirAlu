@@ -1,0 +1,68 @@
+ with recursive leaf_ancestors as (
+        select distinct
+          ml.material_number as leaf, 
+          ml.mana_number as leaf_mana_number, 
+          ml.amount as leaf_amount, 
+          ml.simul as leaf_simul,
+          leaf_material.name as leaf_material_name, 
+          leaf_material.is_serial as leaf_is_serial, 
+          leaf_storloc.storage_location_type as leaf_storage_location_type,
+          parent.material_number as parent
+        from ${schema}.mana_line ml 
+        left join ${schema}.mana_line parent on parent.material_number = ml.mana_number
+        left join ${schema}.mana_line children on children.mana_number = ml.material_number
+        inner join ${schema}.materials leaf_material on leaf_material.catalog_num = ml.material_number
+        inner join ${schema}.storage_location leaf_storloc on leaf_storloc.code = ml.storage_location
+        where children.material_number is null
+        
+        union all
+        
+        select 
+          a.leaf, 
+          a.leaf_mana_number,
+          a.leaf_amount, 
+          a.leaf_simul,
+          a.leaf_material_name, 
+          a.leaf_is_serial, 
+          a.leaf_storage_location_type,   
+          ml.mana_number as parent
+        from 
+          ${schema}.mana_line ml
+          inner join leaf_ancestors a on a.parent = ml.material_number and a.leaf_simul = ml.simul
+      )
+      select
+        root.root_simul,
+        root.root_profession,
+        root.child_material,
+        root.child_status,
+        root.child_update_date,
+        root.child_creation_date,
+        root.child_description,
+        a.leaf, 
+        a.leaf_mana_number,
+        a.leaf_amount,
+        a.leaf_material_name, 
+        a.leaf_is_serial, 
+        a.leaf_storage_location_type
+      from leaf_ancestors a
+      inner join (
+        select
+          root.simul as root_simul,
+          root_prof.description as root_profession,
+          root.status as root_status,
+          child_line.material_number as child_material,
+          child_mana.status as child_status,
+          child_mana.simul as child_simul,
+          child_mana.update_date as child_update_date,
+          child_mana.creation_date as child_creation_date,
+          child_desc.text as child_description
+        from ${schema}.mana root
+        inner join ${schema}.profession root_prof on root_prof.id = root.profession_id
+        left join ${schema}.mana_line parent on parent.material_number = root.catalog_num 
+        left join ${schema}.mana_line child_line on child_line.mana_number = root.catalog_num 
+        inner join ${schema}.mana child_mana on child_mana.catalog_num = child_line.material_number
+        inner join ${schema}.mana_description child_desc on child_desc.code = child_mana.description_code
+        where parent.material_number is null
+      ) root on root.child_material = a.parent and root.root_simul = a.leaf_simul and root.child_simul = a.leaf_simul
+      where root.child_update_date between $1 and $2 or root.child_creation_date between $1 and $2 and root.root_status = $3
+      and root.child_status = $3
